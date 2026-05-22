@@ -24,7 +24,12 @@ async def _fetch_and_cache() -> None:
         logger.error(f"Failed to fetch/cache playlist: {e}")
         return
 
-    lines = ["#EXTM3U"]
+    header = "#EXTM3U"
+    if playlist.header_attrs:
+        header += f" {playlist.header_attrs}"
+    lines = [header]
+    if playlist.extgrp_lines:
+        lines.extend(playlist.extgrp_lines)
     for ch in playlist.channels:
         extinf = "#EXTINF:-1"
         if ch.group_title:

@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 class PlaylistService:
     """Service for processing M3U playlists"""
-    
+
     @staticmethod
     async def fetch_playlist(url: str) -> str:
         """Fetch playlist content from URL"""
@@ -23,60 +23,67 @@ class PlaylistService:
             response.raise_for_status()
             logger.info(f"Fetched playlist from {url}: {len(response.text)} chars, first 500: {response.text[:500]!r}")
             return response.text
-    
+
     @staticmethod
     def parse_m3u(content: str) -> Playlist:
         """Parse M3U content into a Playlist object"""
         lines = content.strip().split('\n')
         channels: list[Channel] = []
         current_channel: Channel | None = None
-        
+        header_attrs: str = ""
+        extgrp_lines: list[str] = []
+
         for line in lines:
             line = line.strip()
-            
-            # Skip empty lines and comments
-            if not line or line.startswith('#'):
-                if line.startswith('#EXTINF:'):
-                    # Parse channel info
-                    current_channel = Channel(
-                        name='',
-                        url=''
-                    )
-                    # Extract name from EXTINF line
-                    name_match = re.search(r'title="([^"]*)"', line)
-                    if name_match:
-                        current_channel.name = name_match.group(1)
-                    else:
-                        # If no title attribute, try to get it from after comma
-                        try:
-                            name_parts = line.split(',', 1)
-                            if len(name_parts) > 1:
-                                current_channel.name = name_parts[1].strip()
-                        except:
-                            pass
-                    
-                    # Extract other attributes
-                    group_match = re.search(r'group-title="([^"]*)"', line)
-                    if group_match:
-                        current_channel.group_title = group_match.group(1)
-                    
-                    tvg_id_match = re.search(r'tvg-id="([^"]*)"', line)
-                    if tvg_id_match:
-                        current_channel.tvg_id = tvg_id_match.group(1)
-                    
-                    tvg_logo_match = re.search(r'tvg-logo="([^"]*)"', line)
-                    if tvg_logo_match:
-                        current_channel.tvg_logo = tvg_logo_match.group(1)
+
+            if not line:
                 continue
-            
-            # This line should be a URL
+
+            if line.startswith('#EXTM3U'):
+                # Preserve everything after #EXTM3U
+                header_attrs = line[len('#EXTM3U'):].strip()
+                continue
+
+            if line.startswith('#EXTGRP:'):
+                extgrp_lines.append(line)
+                continue
+
+            if line.startswith('#EXTINF:'):
+                current_channel = Channel(name='', url='')
+
+                # Extract name: prefer after last comma
+                name_match = re.search(r'title="([^"]*)"', line)
+                if name_match:
+                    current_channel.name = name_match.group(1)
+                else:
+                    parts = line.split(',', 1)
+                    if len(parts) > 1:
+                        current_channel.name = parts[1].strip()
+
+                group_match = re.search(r'group-title="([^"]*)"', line)
+                if group_match:
+                    current_channel.group_title = group_match.group(1)
+
+                tvg_id_match = re.search(r'tvg-id="([^"]*)"', line)
+                if tvg_id_match:
+                    current_channel.tvg_id = tvg_id_match.group(1)
+
+                tvg_logo_match = re.search(r'tvg-logo="([^"]*)"', line)
+                if tvg_logo_match:
+                    current_channel.tvg_logo = tvg_logo_match.group(1)
+                continue
+
+            if line.startswith('#'):
+                continue
+
+            # URL line
             if current_channel:
                 current_channel.url = line
                 channels.append(current_channel)
                 current_channel = None
-        
-        return Playlist(channels=channels)
-    
+
+        return Playlist(channels=channels, header_attrs=header_attrs, extgrp_lines=extgrp_lines)
+
     @staticmethod
     def _extract_hash(url: str) -> str | None:
         """Extract acestream hash from acestream:// or /ace/getstream?id= URLs"""
@@ -90,7 +97,7 @@ class PlaylistService:
     def generate_modified_playlist(original_playlist: Playlist) -> Playlist:
         """Generate a new playlist with modified URLs pointing to local AceStream server"""
         modified_channels = []
-        
+
         for channel in original_playlist.channels:
             hash_value = PlaylistService._extract_hash(channel.url)
             if hash_value:
@@ -104,11 +111,14 @@ class PlaylistService:
                 )
                 modified_channels.append(modified_channel)
             else:
-                # Not an AceStream channel - keep as is
                 modified_channels.append(channel)
-        
-        return Playlist(channels=modified_channels)
-    
+
+        return Playlist(
+            channels=modified_channels,
+            header_attrs=original_playlist.header_attrs,
+            extgrp_lines=original_playlist.extgrp_lines,
+        )
+
     @staticmethod
     async def process_playlist() -> Playlist:
         """Fetch, parse, and process the playlist"""
