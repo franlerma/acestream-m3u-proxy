@@ -1,0 +1,20 @@
+version: "3.8"
+
+services:
+  acestream-proxy:
+    build: .
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    env_file: .env
+    networks:
+      - acestream-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+networks:
+  acestream-network:
+    driver: bridge
