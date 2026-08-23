@@ -2,6 +2,8 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
+from httpx import ConnectError
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import PlainTextResponse
 
@@ -17,9 +19,25 @@ if not logging.root.handlers:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
 async def _fetch_and_cache() -> None:
-    """Fetch playlist, process it, and store in cache."""
+    """Fetch playlist, process it, and store in cache. Retries transient startup failures."""
     try:
         playlist = await PlaylistService.process_playlist()
+    except ConnectError as e:
+        # Transient: upstream (e.g. IPFS gateway) may not be ready yet at startup.
+        # Retry with backoff so a one-off failure doesn't leave the cache empty for a whole interval.
+        logger.warning(f"Connection error fetching playlist: {e}. Retrying...")
+        for attempt in range(1, settings.startup_retries + 1):
+            delay = settings.startup_retry_delay * (2 ** (attempt - 1))
+            logger.info(f"Retry {attempt}/{settings.startup_retries} in {delay}s")
+            await asyncio.sleep(delay)
+            try:
+                playlist = await PlaylistService.process_playlist()
+                break
+            except ConnectError as retry_err:
+                logger.warning(f"Retry {attempt} failed: {retry_err}")
+        else:
+            logger.error(f"Failed to fetch/cache playlist after {settings.startup_retries} retries")
+            return
     except Exception as e:
         logger.error(f"Failed to fetch/cache playlist: {e}")
         return
