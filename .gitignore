@@ -45,3 +45,6 @@ docker-compose.override.yml
 .vscode/
 *.swp
 *.swo
+
+#SDD
+.sdd/
