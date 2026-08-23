@@ -26,3 +26,9 @@ requirements:
 
 clean:
 	rm -rf .venv __pycache__ .mypy_cache .ruff_cache .pytest_cache dist
+
+up:
+	docker compose up --build -d
+
+down:
+	docker compose down
