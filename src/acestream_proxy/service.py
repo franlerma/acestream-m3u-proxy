@@ -10,11 +10,9 @@ logger = logging.getLogger(__name__)
 
 
 class PlaylistService:
-    """Service for processing M3U playlists"""
 
     @staticmethod
     async def fetch_playlist(url: str) -> str:
-        """Fetch playlist content from URL"""
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
@@ -26,7 +24,6 @@ class PlaylistService:
 
     @staticmethod
     def parse_m3u(content: str) -> Playlist:
-        """Parse M3U content into a Playlist object"""
         lines = content.strip().split('\n')
         channels: list[Channel] = []
         current_channel: Channel | None = None
@@ -40,7 +37,6 @@ class PlaylistService:
                 continue
 
             if line.startswith('#EXTM3U'):
-                # Preserve everything after #EXTM3U
                 header_attrs = line[len('#EXTM3U'):].strip()
                 continue
 
@@ -51,7 +47,6 @@ class PlaylistService:
             if line.startswith('#EXTINF:'):
                 current_channel = Channel(name='', url='')
 
-                # Extract name: prefer after last comma
                 name_match = re.search(r'title="([^"]*)"', line)
                 if name_match:
                     current_channel.name = name_match.group(1)
@@ -76,7 +71,6 @@ class PlaylistService:
             if line.startswith('#'):
                 continue
 
-            # URL line
             if current_channel:
                 current_channel.url = line
                 channels.append(current_channel)
@@ -86,7 +80,6 @@ class PlaylistService:
 
     @staticmethod
     def _extract_hash(url: str) -> str | None:
-        """Extract acestream hash from acestream:// or /ace/getstream?id= URLs"""
         if url.startswith("acestream://"):
             return url.split("://")[1]
         if "ace/getstream?id=" in url:
@@ -95,7 +88,6 @@ class PlaylistService:
 
     @staticmethod
     def generate_modified_playlist(original_playlist: Playlist) -> Playlist:
-        """Generate a new playlist with modified URLs pointing to local AceStream server"""
         modified_channels = []
 
         for channel in original_playlist.channels:
@@ -120,8 +112,8 @@ class PlaylistService:
         )
 
     @staticmethod
-    async def process_playlist() -> Playlist:
-        """Fetch, parse, and process the playlist"""
-        content = await PlaylistService.fetch_playlist(settings.playlist_url)
-        original_playlist = PlaylistService.parse_m3u(content)
-        return PlaylistService.generate_modified_playlist(original_playlist)
+    async def process_playlist(name: str, url: str) -> Playlist:
+        content = await PlaylistService.fetch_playlist(url)
+        pl = PlaylistService.parse_m3u(content)
+        logger.info(f"Loaded {len(pl.channels)} channels from '{name}'")
+        return PlaylistService.generate_modified_playlist(pl)

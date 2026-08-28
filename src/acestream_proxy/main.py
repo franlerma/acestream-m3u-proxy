@@ -4,8 +4,7 @@ from contextlib import asynccontextmanager
 
 from httpx import ConnectError
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import PlainTextResponse
+from fastapi import FastAPI
 
 from . import cache
 from .config import settings
@@ -14,34 +13,11 @@ from .service import PlaylistService
 
 logger = logging.getLogger(__name__)
 
-# Configure logging so logger outputs are visible
 if not logging.root.handlers:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
-async def _fetch_and_cache() -> None:
-    """Fetch playlist, process it, and store in cache. Retries transient startup failures."""
-    try:
-        playlist = await PlaylistService.process_playlist()
-    except ConnectError as e:
-        # Transient: upstream (e.g. IPFS gateway) may not be ready yet at startup.
-        # Retry with backoff so a one-off failure doesn't leave the cache empty for a whole interval.
-        logger.warning(f"Connection error fetching playlist: {e}. Retrying...")
-        for attempt in range(1, settings.startup_retries + 1):
-            delay = settings.startup_retry_delay * (2 ** (attempt - 1))
-            logger.info(f"Retry {attempt}/{settings.startup_retries} in {delay}s")
-            await asyncio.sleep(delay)
-            try:
-                playlist = await PlaylistService.process_playlist()
-                break
-            except ConnectError as retry_err:
-                logger.warning(f"Retry {attempt} failed: {retry_err}")
-        else:
-            logger.error(f"Failed to fetch/cache playlist after {settings.startup_retries} retries")
-            return
-    except Exception as e:
-        logger.error(f"Failed to fetch/cache playlist: {e}")
-        return
 
+def _playlist_to_text(playlist) -> str:
     header = "#EXTM3U"
     if playlist.header_attrs:
         header += f" {playlist.header_attrs}"
@@ -59,12 +35,38 @@ async def _fetch_and_cache() -> None:
         extinf += f",{ch.name or 'Unknown'}"
         lines.append(extinf)
         lines.append(ch.url)
-    logger.info(f"Cached {len(playlist.channels)} channels")
-    cache.store(playlist, "\n".join(lines))
+    return "\n".join(lines)
+
+
+async def _fetch_one(name: str, url: str) -> None:
+    try:
+        playlist = await PlaylistService.process_playlist(name, url)
+    except ConnectError as e:
+        logger.warning(f"[{name}] Connection error: {e}. Retrying...")
+        for attempt in range(1, settings.startup_retries + 1):
+            delay = settings.startup_retry_delay * (2 ** (attempt - 1))
+            logger.info(f"[{name}] Retry {attempt}/{settings.startup_retries} in {delay}s")
+            await asyncio.sleep(delay)
+            try:
+                playlist = await PlaylistService.process_playlist(name, url)
+                break
+            except ConnectError as retry_err:
+                logger.warning(f"[{name}] Retry {attempt} failed: {retry_err}")
+        else:
+            logger.error(f"[{name}] Failed after {settings.startup_retries} retries")
+            return
+    except Exception as e:
+        logger.error(f"[{name}] Failed to fetch/cache: {e}")
+        return
+
+    cache.store(name, playlist, _playlist_to_text(playlist))
+
+
+async def _fetch_and_cache() -> None:
+    await asyncio.gather(*[_fetch_one(name, url) for name, url in settings.playlists.items()])
 
 
 async def _periodic_refresh() -> None:
-    """Background task: refresh cache every reload_interval seconds."""
     while True:
         await asyncio.sleep(settings.reload_interval)
         logger.info("Periodic refresh triggered")
@@ -74,12 +76,15 @@ async def _periodic_refresh() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info(f"Starting AceStream Proxy on port {settings.server_port}")
-    logger.info(f"Playlist URL: {settings.playlist_url}")
     logger.info(f"Reload interval: {settings.reload_interval}s")
+    if not settings.playlists:
+        logger.warning("No playlists configured. Set PLAYLIST_URLS=name:url;name2:url2")
+    else:
+        logger.info(f"Configured playlists ({len(settings.playlists)}):")
+        for name in settings.playlists:
+            logger.info(f"  http://localhost:{settings.server_port}/{name}.m3u")
 
-    # Launch initial fetch as background task so uvicorn starts immediately
     asyncio.create_task(_fetch_and_cache())
-    # Launch periodic refresh
     refresh_task = asyncio.create_task(_periodic_refresh())
 
     yield
@@ -99,23 +104,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.include_router(router, prefix="/api")
+app.include_router(router)
 
 
 @app.get("/")
 async def root() -> dict:
     return {
         "message": "AceStream Proxy API",
-        "endpoints": {
-            "GET /api/playlist.m3u": "Processed playlist as JSON",
-            "GET /api/playlist.m3u.txt": "Processed playlist as plain M3U text",
-            "GET /api/hashes": "All AceStream hashes",
-            "GET /hashes.m3u": "Alias for /api/playlist.m3u.txt",
-        },
+        "playlists": {f"/{name}.m3u": f"Playlist '{name}'" for name in settings.playlists},
     }
-
-
-@app.get("/hashes.m3u", response_class=PlainTextResponse)
-async def get_hashes_m3u() -> PlainTextResponse:
-    text = cache.get_cached_playlist_text() or ""
-    return PlainTextResponse(content=text, media_type="audio/x-mpegurl")
