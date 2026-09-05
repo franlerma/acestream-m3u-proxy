@@ -7,6 +7,7 @@ services:
     networks:
       - acestream-network
     command: ["daemon", "--migrate=true"]
+    restart: always
     healthcheck:
       test: ["CMD-SHELL", "ipfs --api=/ip4/127.0.0.1/tcp/5001 diag healthy > /dev/null 2>&1 || exit 1"]
       interval: 30s
@@ -23,12 +24,13 @@ services:
     depends_on:
       ipfs-server:
         condition: service_healthy
+    restart: always
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/', timeout=5)"]
       interval: 10s
       timeout: 5s
       retries: 3
-    restart: always
+    
 
 volumes:
   ipfs_data:
