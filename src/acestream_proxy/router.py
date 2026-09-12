@@ -12,7 +12,7 @@ async def get_playlist_m3u(name: str) -> PlainTextResponse:
     text = cache.get_cached_playlist_text(name)
     if text is None:
         raise HTTPException(status_code=404, detail=f"Playlist '{name}' not found or not yet available")
-    return PlainTextResponse(content=text, media_type="audio/x-mpegurl")
+    return PlainTextResponse(content=text, media_type="text/html")
 
 
 @router.get("/{name}/hashes")
