@@ -1,32 +1,47 @@
-import os
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class Settings:
-    def __init__(self):
-        raw = os.environ.get('PLAYLIST_URLS', '')
-        if not raw:
-            legacy = os.environ.get('PLAYLIST_URL', '')
-            if legacy:
-                raw = f'hashes:{legacy}'
-        self.playlists: dict[str, str] = self._parse_playlists(raw)
-        self.acestream_server_url = os.environ.get('ACESTREAM_SERVER_URL')
-        self.server_port: int = int(os.environ.get('SERVER_PORT', '8000'))
-        self.reload_interval: int = int(os.environ.get('RELOAD_INTERVAL', '3600'))
-        self.startup_retries: int = int(os.environ.get('STARTUP_RETRIES', '6'))
-        self.startup_retry_delay: int = int(os.environ.get('STARTUP_RETRY_DELAY', '5'))
+class Settings(BaseSettings):
+    """Application settings loaded from environment / .env file."""
+
+    playlist_urls: str = ""
+    playlist_url: str = ""  # legacy single-playlist setting
+    acestream_server_url: str | None = None
+    server_port: int = 8000
+    reload_interval: int = 3600
+    startup_retries: int = 6
+    startup_retry_delay: int = 5
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @property
+    def playlists(self) -> dict[str, str]:
+        """Parse configured playlists, falling back to the legacy setting."""
+        raw = self.playlist_urls
+        if not raw and self.playlist_url:
+            raw = f"hashes:{self.playlist_url}"
+        return self._parse_playlists(raw)
 
     @staticmethod
     def _parse_playlists(raw: str) -> dict[str, str]:
         result: dict[str, str] = {}
-        for entry in raw.split(';'):
+        for entry in raw.split(";"):
             entry = entry.strip()
-            if not entry or ':' not in entry:
+            if not entry or ":" not in entry:
                 continue
-            name, url = entry.split(':', 1)
+            name, url = entry.split(":", 1)
             name, url = name.strip(), url.strip()
             if name and url:
                 result[name] = url
         return result
+
+    def validate_runtime(self) -> None:
+        """Fail fast when required runtime configuration is missing."""
+        url = self.acestream_server_url
+        if not url or "{hash}" not in url:
+            raise ValueError(
+                "ACESTREAM_SERVER_URL must be set and contain the '{hash}' placeholder"
+            )
 
 
 settings = Settings()

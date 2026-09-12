@@ -1,28 +1,23 @@
-.PHONY: install dev lint typecheck test run clean
+.PHONY: install dev lint typecheck test run clean up down
 
 install:
-	uv venv .venv
-	uv pip install -r requirements.txt
+	uv sync --extra dev
 
 dev:
-	uv pip install -r requirements.txt
-	uv pip install --dev
+	uv sync --extra dev
 
 lint:
-	ruff check src/ tests/
-	ruff format src/ tests/
+	uv run ruff check src/ tests/
+	uv run ruff format src/ tests/
 
 typecheck:
-	mypy src/
+	uv run mypy src/
 
 test:
-	pytest --cov=src --cov-report=term-missing
+	uv run pytest
 
 run:
 	uv run python -m src.acestream_proxy.main
-
-requirements:
-	uv pip compile pyproject.toml -o requirements.txt
 
 clean:
 	rm -rf .venv __pycache__ .mypy_cache .ruff_cache .pytest_cache dist

@@ -1,32 +1,76 @@
+import pytest
 from fastapi.testclient import TestClient
 
+from src.acestream_proxy import cache
 from src.acestream_proxy.main import app
+from src.acestream_proxy.models import Channel, Playlist
 
 client = TestClient(app)
 
-def test_root_endpoint():
-    """Test root endpoint"""
+
+@pytest.fixture
+def demo_playlist() -> Playlist:
+    return Playlist(
+        channels=[
+            Channel(name="One", url="acestream://hash1"),
+            Channel(name="Two", url="http://host/ace/getstream?id=hash2"),
+        ],
+        header_attrs='url-tvg="http://epg"',
+    )
+
+
+def _seed(playlist: Playlist) -> str:
+    text = playlist.to_m3u()
+    cache.store("demo", playlist, text)
+    return text
+
+
+def test_root_endpoint() -> None:
     response = client.get("/")
     assert response.status_code == 200
     data = response.json()
-    assert "message" in data
     assert "AceStream Proxy" in data["message"]
 
-def test_playlist_endpoint():
-    """Test playlist endpoint - should return 404 or handle gracefully"""
-    response = client.get("/api/playlist.m3u")
-    # This will fail since we don't have a real playlist to fetch
-    # The main purpose of this test is to ensure the endpoint exists
-    assert response.status_code in [200, 404, 500]
 
-def test_playlist_text_endpoint():
-    """Test playlist text endpoint"""
-    response = client.get("/api/playlist.m3u.txt")
-    # This will fail since we don't have a real playlist to fetch
-    assert response.status_code in [200, 404, 500]
+def test_get_m3u_ok(demo_playlist: Playlist) -> None:
+    text = _seed(demo_playlist)
 
-def test_hashes_endpoint():
-    """Test hashes endpoint"""
-    response = client.get("/api/hashes")
-    # This will fail since we don't have a real playlist to fetch
-    assert response.status_code in [200, 404, 500]
+    response = client.get("/demo.m3u")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert response.text == text
+    assert "etag" in response.headers
+    assert response.headers["cache-control"] == "no-cache"
+
+
+def test_get_m3u_not_modified(demo_playlist: Playlist) -> None:
+    _seed(demo_playlist)
+    etag = client.get("/demo.m3u").headers["etag"]
+
+    response = client.get("/demo.m3u", headers={"If-None-Match": etag})
+
+    assert response.status_code == 304
+    assert response.headers["etag"] == etag
+
+
+def test_get_m3u_unknown_name_returns_404() -> None:
+    response = client.get("/does-not-exist.m3u")
+    assert response.status_code == 404
+
+
+def test_hashes_endpoint(demo_playlist: Playlist) -> None:
+    _seed(demo_playlist)
+
+    response = client.get("/demo/hashes")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["name"] == "demo"
+    assert data["count"] == 2
+    assert set(data["hashes"]) == {"hash1", "hash2"}
+
+
+def test_hashes_unknown_name_returns_404() -> None:
+    response = client.get("/does-not-exist/hashes")
+    assert response.status_code == 404

@@ -49,4 +49,3 @@ docker-compose.override.yml
 #SDD
 .sdd/
 token-optimizer/
-uv.lock
