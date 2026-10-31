@@ -26,7 +26,7 @@ async def get_playlist_m3u(
     if if_none_match == etag:
         return Response(status_code=304, headers=headers)
 
-    return Response(content=text, media_type="text/html", headers=headers)
+    return Response(content=text, media_type="text/plain", headers=headers)
 
 
 @router.get("/{name}/hashes")

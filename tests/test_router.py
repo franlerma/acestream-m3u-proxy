@@ -38,7 +38,7 @@ def test_get_m3u_ok(demo_playlist: Playlist) -> None:
     response = client.get("/demo.m3u")
 
     assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/html")
+    assert response.headers["content-type"].startswith("text/plain")
     assert response.text == text
     assert "etag" in response.headers
     assert response.headers["cache-control"] == "no-cache"
