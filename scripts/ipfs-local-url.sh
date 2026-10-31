@@ -49,21 +49,28 @@ HOST="${IPFS_HOST:-$(local_ip)}"
 PORT="${IPFS_PORT:-$(compose_port)}"
 GATEWAY="${IPFS_GATEWAY:-http://$HOST:$PORT}"
 
-# quitar esquema y host, y el fragmento (#...)
-path="${url#*://}"
-path="${path#*/}"
+# separar host y ruta; quitar el fragmento (#...)
+rest="${url#*://}"
+host="${rest%%/*}"
+path="${rest#"$host"}"
+path="${path#/}"
 path="${path%%#*}"
 
-case "$path" in
-  ipfs/*|ipns/*) out="$path" ;;            # ya trae prefijo
-  *)
-    first="${path%%/*}"
-    case "$first" in
-      Qm*|bafy*|bafk*) ns=ipfs ;;          # CID
-      *)               ns=ipns ;;          # k51..., dominios DNSLink
-    esac
-    out="$ns/$path"
-    ;;
-esac
+if [[ "$host" =~ ^([^.]+)\.(ipfs|ipns)\. ]]; then
+  # gateway de subdominio: <id>.ipns.dominio / <id>.ipfs.dominio
+  out="${BASH_REMATCH[2]}/${BASH_REMATCH[1]}/$path"
+else
+  case "$path" in
+    ipfs/*|ipns/*) out="$path" ;;            # ya trae prefijo
+    *)
+      first="${path%%/*}"
+      case "$first" in
+        Qm*|bafy*|bafk*) ns=ipfs ;;          # CID
+        *)               ns=ipns ;;          # k51..., dominios DNSLink
+      esac
+      out="$ns/$path"
+      ;;
+  esac
+fi
 
 echo "$GATEWAY/$out"
