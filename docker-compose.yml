@@ -3,7 +3,7 @@ services:
     container_name: ipfs-server
     image: ipfs/kubo:release
     ports:
-      - "18000:8000"
+      - "18000:8080"
     volumes:
       - ipfs_data:/data/ipfs
     networks:
